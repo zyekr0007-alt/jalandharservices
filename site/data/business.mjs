@@ -18,7 +18,10 @@ export const business = {
   phoneTel: '+919914772275',
   whatsapp: '919914772275',
 
-  email: null, // ← e.g. 'hello@jalandharservices.in'. Row hides until set.
+  // Live as of 2026-09-23 — Cloudflare Email Routing is enabled on the zone
+  // with a catch-all forwarding to the owner, so every address at this domain
+  // delivers. hello@ is the published one; contact@ and info@ also work.
+  email: 'hello@jalandharservices.in',
 
   // Service-area business: no street address is published, and the schema below
   // says so honestly (addressLocality only, no streetAddress, no postalCode).

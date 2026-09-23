@@ -3,20 +3,29 @@
  *
  * ⚠️ READ THIS BEFORE DEPLOYING
  *
- * This function has NO delivery credentials by default. When they are absent it
- * returns 503 on purpose, because the quote form is written to fall back to a
- * pre-filled WhatsApp message on any non-2xx response. A function that returned
- * 200 while silently dropping the lead would lose real customers — failing
- * loudly is the safe behaviour here.
+ * This function has NO delivery configured by default and returns **503** when
+ * it cannot deliver. That is deliberate: the quote form treats any non-2xx as a
+ * failure and falls back to opening WhatsApp with the details already filled
+ * in. A function that returned 200 while silently dropping the lead would lose
+ * real customers. If you "fix" the 503, you break the only thing standing
+ * between a customer and a lost enquiry.
  *
- * To switch delivery on, set these in the Cloudflare Pages project
- * (Settings → Environment variables, or `wrangler pages secret put <NAME>`):
+ * Two delivery paths, checked in this order:
  *
- *   TELEGRAM_BOT_TOKEN   from @BotFather
- *   TELEGRAM_CHAT_ID     the chat the leads should land in
+ * 1. EMAIL — a `send_email` binding named LEAD_EMAIL.
+ *    Cloudflare Email Routing is already enabled on jalandharservices.in with
+ *    zyekr0007@gmail.com as a verified destination, so this needs no external
+ *    service, no bot, and no secret to paste. Add it in the dashboard:
+ *      Workers & Pages → jalandharservices → Settings → Functions
+ *      → Email bindings → Add → variable name `LEAD_EMAIL`,
+ *        destination `zyekr0007@gmail.com`
+ *    (The Pages API silently ignores send_email on PATCH, so it has to be the
+ *    dashboard. Verified 2026-09-23.)
  *
- * Optional:
- *   ALLOWED_ORIGIN       defaults to https://jalandharservices.in
+ * 2. TELEGRAM — TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID environment variables.
+ *    Kept as a fallback. Set them under Settings → Environment variables.
+ *
+ * Optional: ALLOWED_ORIGIN, defaults to https://jalandharservices.in
  */
 
 const json = (body, status = 200) =>
@@ -25,15 +34,16 @@ const json = (body, status = 200) =>
     headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   });
 
-// Strip anything that would let a submission inject newlines into the
-// Telegram message, and cap length so a huge body cannot be used to spam.
+// Strip control characters so a submission cannot inject newlines into a
+// message, and cap length so a huge body cannot be used to spam the inbox.
 const clean = (v, max = 400) =>
   String(v == null ? '' : v)
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .trim()
     .slice(0, max);
 
-const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escapeHtml = (s) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export async function onRequestPost({ request, env }) {
   const origin = request.headers.get('Origin') || '';
@@ -68,44 +78,79 @@ export async function onRequestPost({ request, env }) {
     return json({ ok: false, error: 'phone number looks invalid' }, 400);
   }
 
+  const rows = [
+    ['Name', lead.name],
+    ['Phone', lead.phone],
+    ['Area', lead.area],
+    ['Service', lead.service],
+    ['Details', lead.details],
+    ['Page', lead.page],
+    ['Received', lead.submittedAt],
+  ].filter(([, v]) => v);
+
+  // ── 1. Email via the Email Routing send_email binding ──────────────────
+  if (env.LEAD_EMAIL && typeof env.LEAD_EMAIL.send === 'function') {
+    try {
+      await env.LEAD_EMAIL.send({
+        // `from` must be on a domain in this account with Email Routing on.
+        from: 'leads@jalandharservices.in',
+        to: 'zyekr0007@gmail.com',
+        subject: `Quote request: ${lead.service || 'general'} — ${lead.name}`,
+        text: rows.map(([k, v]) => `${k}: ${v}`).join('\n'),
+        html:
+          '<h2>New quote request — jalandharservices.in</h2><table cellpadding="6">' +
+          rows
+            .map(
+              ([k, v]) =>
+                `<tr><td><strong>${escapeHtml(k)}</strong></td><td>${escapeHtml(v)}</td></tr>`
+            )
+            .join('') +
+          '</table>',
+      });
+      return json({ ok: true, via: 'email' });
+    } catch {
+      // fall through to Telegram rather than losing the lead
+    }
+  }
+
+  // ── 2. Telegram ────────────────────────────────────────────────────────
   const token = env.TELEGRAM_BOT_TOKEN;
   const chatId = env.TELEGRAM_CHAT_ID;
 
-  if (!token || !chatId) {
-    // Loud failure → the browser falls back to WhatsApp and the lead survives.
-    return json(
-      { ok: false, error: 'lead delivery is not configured on the server' },
-      503
-    );
-  }
+  if (token && chatId) {
+    const text = [
+      '<b>New quote request — jalandharservices.in</b>',
+      '',
+      ...rows.map(([k, v]) => `<b>${escapeHtml(k)}</b>  ${escapeHtml(v)}`),
+    ].join('\n');
 
-  const text = [
-    '<b>New quote request — jalandharservices.in</b>',
-    '',
-    `<b>Name</b>  ${escapeHtml(lead.name)}`,
-    `<b>Phone</b>  ${escapeHtml(lead.phone)}`,
-    lead.area ? `<b>Area</b>  ${escapeHtml(lead.area)}` : '',
-    lead.service ? `<b>Service</b>  ${escapeHtml(lead.service)}` : '',
-    lead.details ? `\n<b>Details</b>\n${escapeHtml(lead.details)}` : '',
-    lead.page ? `\n<i>from ${escapeHtml(lead.page)}</i>` : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
-    });
-    if (!res.ok) {
-      return json({ ok: false, error: 'delivery failed' }, 502);
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        }),
+      });
+      if (res.ok) return json({ ok: true, via: 'telegram' });
+    } catch {
+      /* fall through */
     }
-  } catch {
     return json({ ok: false, error: 'delivery failed' }, 502);
   }
 
-  return json({ ok: true });
+  // ── Nothing configured — fail loudly so the WhatsApp fallback fires ────
+  return json(
+    {
+      ok: false,
+      error:
+        'lead delivery is not configured: add a LEAD_EMAIL email binding, or TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID',
+    },
+    503
+  );
 }
 
 export async function onRequestGet() {
