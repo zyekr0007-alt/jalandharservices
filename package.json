@@ -1,0 +1,13 @@
+{
+  "name": "jalandharservices",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Jalandhar Services — painting, cleaning, deep cleaning and waterproofing across Jalandhar and nearby Punjab.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check.mjs",
+    "serve": "node scripts/serve.mjs",
+    "deploy": "node scripts/build.mjs && npx wrangler pages deploy dist --project-name=jalandharservices --branch=main --commit-dirty=true"
+  }
+}

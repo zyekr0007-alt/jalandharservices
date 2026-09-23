@@ -1,0 +1,1189 @@
+#!/usr/bin/env node
+/**
+ * Static site generator.
+ *
+ *   source of truth : site/data/*.mjs  +  site/lib/*.mjs  +  site/styles/site.css
+ *   output          : dist/  (this is what Cloudflare Pages serves)
+ *
+ * Everything is generated so that headers, footers, schema and internal links
+ * can never drift apart — the failure mode of hand-maintained static sites.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+import { business, abs } from '../site/data/business.mjs';
+import { services, subServices, serviceByKey, subServiceBySlug } from '../site/data/services.mjs';
+import { areas, areaBySlug } from '../site/data/areas.mjs';
+import { posts, postBySlug } from '../site/data/posts.mjs';
+import {
+  renderPage, breadcrumbSchema, faqSchema, serviceSchema, dateLong,
+} from '../site/lib/layout.mjs';
+import * as ui from '../site/lib/ui.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DIST = path.join(ROOT, 'dist');
+
+const AREA_NAMES = areas.map((a) => a.name);
+
+// ───────────────────────────────────────────────────────────── output dirs ──
+fs.rmSync(DIST, { recursive: true, force: true });
+for (const d of ['', 'assets/generated', 'assets/img', 'journal']) {
+  fs.mkdirSync(path.join(DIST, d), { recursive: true });
+}
+
+// ─────────────────────────────────────────────── assets, content-hashed ──
+// Hash the bytes and bake the hash into the filename, so a changed file is a
+// changed URL and can be cached immutably. No manual cache-busting ever.
+function emitAsset(relSource, ext) {
+  const src = fs.readFileSync(path.join(ROOT, relSource));
+  const hash = crypto.createHash('sha256').update(src).digest('hex').slice(0, 12);
+  const name = path.basename(relSource, path.extname(relSource));
+  const out = `/assets/generated/${name}-${hash}.${ext}`;
+  fs.writeFileSync(path.join(DIST, out), src);
+  return out;
+}
+
+const CSS = emitAsset('site/styles/site.css', 'css');
+const JS = emitAsset('assets/site.js', 'js');
+
+// Copy static assets (icons, og image) verbatim.
+const STATIC = ['assets/img'];
+for (const dir of STATIC) {
+  const from = path.join(ROOT, dir);
+  if (!fs.existsSync(from)) continue;
+  fs.cpSync(from, path.join(DIST, dir), { recursive: true });
+}
+
+// ───────────────────────────────────────────────────────────────── helpers ──
+
+const written = [];
+function page(relPath, html) {
+  const out = path.join(DIST, relPath);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, html);
+  written.push('/' + relPath);
+}
+
+const common = (extra = {}) => ({ css: CSS, js: JS, ...extra });
+
+const crumbs = (trail) => ui.breadcrumbs(trail);
+
+/** Standard CTA + FAQ tail shared by most pages. */
+function tail({ faqs, cta, ctaArgs }) {
+  return (
+    (faqs && faqs.length
+      ? ui.section({ tone: 'tone-white', body: ui.faqs(faqs) })
+      : '') + (cta === false ? '' : ui.ctaBand(ctaArgs || {}))
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════ HOME ══
+
+function buildHome() {
+  const homeFaqs = [
+    { q: 'Which areas of Jalandhar do you cover?', a: 'All of Jalandhar city — Model Town, Urban Estate, Guru Teg Bahadur Nagar, Green Model Town, Wadala, Basti Bawa Khel, Lamba Pind, Dakoha, and the colonies along Nakodar Road, Kapurthala Road and Hoshiarpur Road. We also cover Kapurthala, Phagwara, Nakodar and Hoshiarpur, and villages within about 40 km.' },
+    { q: 'Do you charge for a site visit or a quote?', a: 'No. The site visit, the measurement and the written quote are free anywhere in our coverage area. For waterproofing and damp problems the inspection includes moisture-meter readings, and you get the findings whether or not you go ahead.' },
+    { q: 'How soon can you start?', a: 'Cleaning is usually within two to three days. Painting and waterproofing follow the season — most interior painting runs October to April and waterproofing February to May, and those windows fill up. Call and we will give you a realistic date rather than an optimistic one.' },
+    { q: 'Is the price fixed, or can it change once work starts?', a: 'The price on your written quote is the price you pay, provided the scope does not change. If we open up a wall or a slab and find something that genuinely changes the job, we stop and tell you before doing anything that costs more. Nothing gets added without your agreement.' },
+    { q: 'Do you bring your own equipment and materials?', a: 'Yes. Our crews arrive with their own machines and chemicals, and for painting and waterproofing we supply branded materials at trade rates with the brand and product named on your quote. You are welcome to buy your own paint if you prefer — we will tell you the litre count per room.' },
+    { q: 'What payment terms do you ask for?', a: business.paymentTerms },
+  ];
+
+  const body = `
+${ui.hero({
+    kicker: 'Jalandhar & nearby · Free site visit',
+    h1: 'Painting, cleaning and waterproofing across <em>Jalandhar</em>',
+    lede:
+      'One team for the jobs a house actually needs — interior and exterior painting, deep cleaning, and terrace or seepage waterproofing. ' +
+      '<strong>Free site visit, a fixed written quote, and the published rates on this page.</strong> No "we will see after inspecting" pricing.',
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    facts: [
+      { k: 'Site visit', v: 'Free, across Jalandhar' },
+      { k: 'Quotes', v: 'Fixed and in writing' },
+      { k: 'Coverage', v: 'Jalandhar + 40 km' },
+      { k: 'Crew', v: 'Our own, with equipment' },
+    ],
+  })}
+
+${ui.areaMarquee()}
+
+${ui.section({
+    tone: 'tone-white',
+    body:
+      ui.sectionHead({
+        h2: 'Four services, one reliable team',
+        sub: 'Each one has its own rate card so you can see exactly what you are paying for before anyone visits.',
+      }) + ui.serviceCards(),
+  })}
+
+${ui.section({
+    body:
+      ui.sectionHead({
+        h2: 'Published rates, not mystery pricing',
+        sub: 'These are the numbers we quote from. The final figure is confirmed after a free site visit, because wall condition and slab preparation genuinely change the job.',
+      }) +
+      ui.priceTable({
+        caption: 'A sample of the full rate card. Every service page carries its own.',
+        rows: [
+          { item: 'Interior painting', unit: 'per sq ft', price: '₹12 – ₹22', note: 'Putty, primer, 2 coats included' },
+          { item: 'Exterior weatherproof painting', unit: 'per sq ft', price: '₹18 – ₹35', note: 'Primer + 2 coats' },
+          { item: 'Bathroom deep clean', unit: 'each', price: '₹890 – ₹1,190', note: 'Premium tier descaled' },
+          { item: 'Kitchen deep clean', unit: 'each', price: '₹2,490 – ₹4,490', note: 'Chimney and hob included' },
+          { item: '2 BHK full house deep clean', unit: 'package', price: '₹9,500 – ₹11,900', note: '2 bathrooms + 1 kitchen' },
+          { item: 'Terrace waterproofing', unit: 'per sq ft', price: '₹40 – ₹100', note: 'System dependent' },
+          { item: 'Sofa cleaning', unit: 'per seat', price: '₹199 – ₹349', note: 'Extraction, not shampoo' },
+        ],
+        note:
+          'Full rate cards are on each service page. Cleaning rates are our published card; painting and waterproofing are the prevailing Jalandhar bands for 2026.',
+      }) +
+      `<div class="center-actions"><a class="btn btn-primary" href="/pricing.html">See the full price list</a></div>`,
+  })}
+
+${ui.section({
+    tone: 'tone-tint',
+    body:
+      ui.sectionHead({
+        h2: 'How we work',
+        sub: 'The same six steps whether the job is a bathroom or a whole terrace.',
+      }) +
+      ui.steps([
+        { t: 'You tell us what you need', d: 'Call, WhatsApp or send the form. A photo and your area is usually enough for us to know whether we are the right people for it.' },
+        { t: 'Free site visit', d: 'We measure the actual surface area for painting, read wall moisture for damp, or check slope and drainage for waterproofing. This is where a real quote comes from.' },
+        { t: 'Fixed written quote', d: 'Per-unit or per-sq-ft pricing, the products named, the scope stated, and what is not included. It does not change on the day.' },
+        { t: 'We schedule and arrive', d: 'A date we can actually keep, a crew that turns up on time with its own equipment, and a call if anything changes.' },
+        { t: 'The work', d: 'Done to the specification in the quote — including the preparation steps that cheap quotes skip and that decide how long the result lasts.' },
+        { t: 'Walkthrough and handover', d: 'You inspect with the crew lead while everyone is still on site. Anything you flag gets fixed before we leave, and the balance is due after that.' },
+      ]),
+  })}
+
+${ui.section({
+    body:
+      ui.sectionHead({
+        h2: 'Why homeowners in Jalandhar call us back',
+      }) +
+      ui.includes([
+        'A free site visit with real measurements and, for damp problems, actual moisture readings',
+        'Fixed written quotes — the scope and the products are on paper before work starts',
+        'Our own crews with their own machines, not subcontracted to whoever is free that day',
+        'Preparation done properly: scraping and putty before paint, crack filling and drainage before membrane',
+        'Safe chemistry — no acid on marble or chrome, and food-safe degreasers rinsed off kitchen surfaces',
+        'A walkthrough at the end, with rework on the spot rather than a return visit next week',
+        'Honest advice to wait when a wall is damp or a season is wrong, even though it delays our payment',
+      ], 'What you get on every job')},
+  )}
+
+${ui.section({
+    tone: 'tone-white',
+    body:
+      ui.sectionHead({
+        h2: 'Where we work',
+        sub: 'Jalandhar city and about 40 km around it. Each area page says what is genuinely different about working there.',
+      }) +
+      `<div class="area-grid">${areas
+        .map(
+          (a) => `<a class="area-tile reveal" href="/${a.slug}.html">
+        <strong>${a.name}</strong>
+        <span>${a.travel}</span>
+      </a>`
+        )
+        .join('')}</div>`,
+  })}
+
+${ui.section({
+    body:
+      ui.sectionHead({ h2: 'Advice before you book', sub: 'Straight answers to the questions people ask us first.' }) +
+      ui.postCards(posts, 3) +
+      `<div class="center-actions"><a class="btn btn-outline" href="/journal.html">All guides</a></div>`,
+  })}
+
+${tail({ faqs: homeFaqs })}
+`;
+
+  page('index.html', renderPage(common({
+    title: 'Painting, Cleaning & Waterproofing in Jalandhar',
+    description:
+      'Painting, deep cleaning and waterproofing in Jalandhar. Published rates, free site visit and a fixed written quote. Cleaning from ₹890, painting from ₹12/sq ft.',
+    path: '/',
+    body,
+    preload: null,
+    schema: [
+      faqSchema(homeFaqs),
+      {
+        '@type': 'WebSite',
+        '@id': abs('/#website'),
+        url: abs('/'),
+        name: business.name,
+        inLanguage: 'en-IN',
+        publisher: { '@id': abs('/#business') },
+      },
+    ],
+  })));
+}
+
+// ═══════════════════════════════════════════════════════ SERVICE PAGES ══
+
+function buildServiceHub(s) {
+  const isSub = false;
+  const subs = (s.subSlugs || []).map((sl) => subServiceBySlug[sl]).filter(Boolean);
+  const trail = [{ name: 'Home', path: '/' }, { name: s.name, path: '/' + s.slug + '.html' }];
+
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: `${s.shortName} · Jalandhar & nearby`,
+    h1: s.h1,
+    lede: s.lede,
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body:
+      ui.sectionHead({ h2: 'Rates' }) +
+      ui.priceTable({ caption: s.priceCaption, rows: s.priceTable }) +
+      `<div class="center-actions"><a class="btn btn-primary" href="/quote.html">Get this quoted for my home</a></div>`,
+  })}
+
+${ui.section({
+    body:
+      `<div class="split">
+        <div>${ui.includes(s.includes)}</div>
+        <div>${ui.steps(s.process, 'What happens, step by step')}</div>
+      </div>`,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body: ui.prose(s.sections),
+  })}
+
+${
+    subs.length
+      ? ui.section({
+          body:
+            ui.sectionHead({ h2: `More on ${s.shortName.toLowerCase()}` }) +
+            `<div class="post-grid">${subs
+              .map(
+                (x) => `<a class="post-card reveal" href="/${x.slug}.html">
+          <h3>${x.name}</h3>
+          <p>${x.description}</p>
+          <span class="post-more">Read
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"/></svg>
+          </span>
+        </a>`
+              )
+              .join('')}</div>`,
+        })
+      : ''
+  }
+
+${tail({ faqs: s.faqs })}
+`;
+
+  page(s.slug + '.html', renderPage(common({
+    title: s.title,
+    description: s.description,
+    path: '/' + s.slug + '.html',
+    body,
+    schema: [breadcrumbSchema(trail), serviceSchema(s, AREA_NAMES), faqSchema(s.faqs)],
+  })));
+}
+
+function buildSubService(x) {
+  const parent = serviceByKey[x.parent];
+  const trail = [
+    { name: 'Home', path: '/' },
+    { name: parent.name, path: '/' + parent.slug + '.html' },
+    { name: x.name, path: '/' + x.slug + '.html' },
+  ];
+
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: `${x.name} · Jalandhar`,
+    h1: x.h1,
+    lede: x.lede,
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body: ui.sectionHead({ h2: 'Rates' }) + ui.priceTable({ caption: x.priceCaption, rows: x.priceTable }),
+  })}
+
+${ui.section({
+    body:
+      `<div class="split">
+        <div>${ui.includes(x.includes)}</div>
+        <div>${ui.steps(x.process, 'How the job runs')}</div>
+      </div>`,
+  })}
+
+${ui.section({ tone: 'tone-white', body: ui.prose(x.sections) })}
+
+${ui.section({
+    tone: 'tone-tint',
+    body:
+      ui.sectionHead({ h2: 'Related', sub: `This is part of our ${parent.name.toLowerCase()} work.` }) +
+      `<div class="link-row">
+        <a class="pill-link" href="/${parent.slug}.html">${parent.name}</a>
+        ${x.related
+          .filter((sl) => sl !== x.slug)
+          .map((sl) => {
+            const t = subServiceBySlug[sl] || serviceByKey[Object.keys(serviceByKey).find((k) => serviceByKey[k].slug === sl)];
+            return t ? `<a class="pill-link" href="/${t.slug}.html">${t.name}</a>` : '';
+          })
+          .join('')}
+      </div>`,
+  })}
+
+${tail({ faqs: x.faqs })}
+`;
+
+  page(x.slug + '.html', renderPage(common({
+    title: x.title,
+    description: x.description,
+    path: '/' + x.slug + '.html',
+    body,
+    schema: [breadcrumbSchema(trail), serviceSchema(x, AREA_NAMES), faqSchema(x.faqs)],
+  })));
+}
+
+// ══════════════════════════════════════════════════════════ AREA PAGES ══
+
+function buildAreaPage(a) {
+  const trail = [
+    { name: 'Home', path: '/' },
+    { name: 'Service areas', path: '/service-areas.html' },
+    { name: a.name, path: '/' + a.slug + '.html' },
+  ];
+
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: `${a.name} · ${a.travel}`,
+    h1: a.h1,
+    lede: a.lede,
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    facts: a.facts.map((f) => ({ k: f.k, v: f.v })),
+    compact: true,
+  })}
+
+${ui.section({ tone: 'tone-white', body: ui.prose(a.sections) })}
+
+${ui.section({
+    body:
+      ui.sectionHead({ h2: `Services in ${a.name}` }) +
+      ui.serviceCards() +
+      (a.localities
+        ? `<div class="localities reveal"><h3>Localities we cover in ${a.name}</h3><p>${a.localities.join(' · ')}</p></div>`
+        : ''),
+  })}
+
+${tail({ faqs: a.faqs })}
+`;
+
+  page(a.slug + '.html', renderPage(common({
+    title: a.title,
+    description: a.description,
+    path: '/' + a.slug + '.html',
+    body,
+    schema: [
+      breadcrumbSchema(trail),
+      faqSchema(a.faqs),
+      {
+        '@type': 'Service',
+        name: `Painting, cleaning and waterproofing in ${a.name}`,
+        provider: { '@id': abs('/#business') },
+        areaServed: { '@type': 'City', name: a.name },
+        url: abs('/' + a.slug + '.html'),
+      },
+    ],
+  })));
+}
+
+function buildAreasHub() {
+  const trail = [{ name: 'Home', path: '/' }, { name: 'Service areas', path: '/service-areas.html' }];
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'Coverage',
+    h1: 'Service areas around Jalandhar',
+    lede:
+      'We work across <strong>Jalandhar city</strong> and roughly <strong>40 km around it</strong> — Kapurthala, Phagwara, Nakodar, Hoshiarpur and the villages between them. Site visits are free anywhere in that area.',
+    primary: { href: '/quote.html', label: 'Check my area' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body:
+      ui.sectionHead({ h2: 'Pick your area', sub: 'Each page covers what is genuinely different about working there — housing stock, water, rainfall and the jobs people actually book.' }) +
+      `<div class="area-grid">${areas
+        .map(
+          (a) => `<a class="area-tile reveal" href="/${a.slug}.html">
+        <strong>${a.name}</strong>
+        <span>${a.travel}</span>
+      </a>`
+        )
+        .join('')}</div>`,
+  })}
+
+${ui.section({
+    body:
+      ui.sectionHead({ h2: 'Towns and villages we also cover', sub: 'Within about 40 km of Jalandhar. If yours is not listed, call and ask — we will give you a straight answer rather than take a booking we cannot serve well.' }) +
+      `<div class="link-row">${['Adampur', 'Kartarpur', 'Banga', 'Phillaur', 'Sultanpur Lodhi', 'Nawanshahr', 'Goraya', 'Shahkot', 'Jamsher', 'Alawalpur', 'Bhogpur', 'Mehatpur', 'Lohian', 'Jandiala']
+        .map((n) => `<span class="pill-link is-static">${n}</span>`)
+        .join('')}</div>`,
+  })}
+
+${ui.section({ tone: 'tone-white', body: ui.sectionHead({ h2: 'All services, everywhere we work' }) + ui.serviceCards() })}
+
+${tail({ faqs: [
+      { q: 'Do you charge extra outside Jalandhar city?', a: 'The published rates are the same. For outlying areas we batch the trip, so very small jobs are poor value for you and we will say so rather than take the booking. Large jobs carry no travel charge.' },
+      { q: 'How far do you travel?', a: 'About 40 km from Jalandhar — which covers Kapurthala, Phagwara, Nakodar, Hoshiarpur and the villages around them. Beyond that we will usually decline rather than do a rushed job or add a travel charge that makes it poor value.' },
+      { q: 'Can I combine work at two properties in one visit?', a: 'Yes, and it is worth doing if you have more than one. Tell us both addresses when you book and we will schedule them together to save a trip.' },
+      { q: 'Do you cover villages?', a: 'Generally yes within about 40 km. Tell us the village name and we will confirm. For outlying locations, booking a little further ahead helps because we batch the visits.' },
+    ] })}
+`;
+  page('service-areas.html', renderPage(common({
+    title: 'Service Areas — Painting, Cleaning & Waterproofing',
+    description:
+      'We cover Jalandhar city and about 40 km around it — Model Town, Kapurthala, Phagwara, Nakodar, Hoshiarpur and surrounding villages. Free site visits.',
+    path: '/service-areas.html',
+    body,
+    schema: [breadcrumbSchema(trail)],
+  })));
+}
+
+// ══════════════════════════════════════════════════════════════ JOURNAL ══
+
+function buildPost(p) {
+  const trail = [
+    { name: 'Home', path: '/' },
+    { name: 'Advice & guides', path: '/journal.html' },
+    { name: p.h1, path: '/journal/' + p.slug + '.html' },
+  ];
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'Guide · ' + dateLong(p.date),
+    h1: p.h1,
+    lede: p.lede,
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+
+${ui.section({ tone: 'tone-white', body: ui.prose(p.sections) })}
+
+${tail({ faqs: p.faqs })}
+`;
+  page('journal/' + p.slug + '.html', renderPage(common({
+    title: p.title,
+    description: p.description,
+    path: '/journal/' + p.slug + '.html',
+    ogType: 'article',
+    body,
+    schema: [
+      breadcrumbSchema(trail),
+      faqSchema(p.faqs),
+      {
+        '@type': 'Article',
+        headline: p.h1,
+        description: p.description,
+        datePublished: p.date,
+        dateModified: p.date,
+        inLanguage: 'en-IN',
+        author: { '@id': abs('/#business') },
+        publisher: { '@id': abs('/#business') },
+        mainEntityOfPage: abs('/journal/' + p.slug + '.html'),
+      },
+    ],
+  })));
+}
+
+function buildJournal() {
+  const trail = [{ name: 'Home', path: '/' }, { name: 'Advice & guides', path: '/journal.html' }];
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'Advice',
+    h1: 'Guides on painting, cleaning and waterproofing in Jalandhar',
+    lede:
+      'The questions people ask before they book — what it costs, when to do it, how to tell a good quote from a bad one. Written to be useful whether or not you hire us.',
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+${ui.section({ tone: 'tone-white', body: ui.postCards(posts) })}
+${tail({})}
+`;
+  page('journal.html', renderPage(common({
+    title: 'Guides — Painting, Cleaning & Waterproofing in Jalandhar',
+    description:
+      'Straight guides on painting costs, waterproofing seasons, damp diagnosis and deep cleaning prices in Jalandhar. Written to be useful whether or not you hire us.',
+    path: '/journal.html',
+    body,
+    schema: [breadcrumbSchema(trail), {
+      '@type': 'CollectionPage',
+      name: 'Advice & guides',
+      url: abs('/journal.html'),
+      hasPart: posts.map((p) => ({ '@type': 'Article', headline: p.h1, url: abs('/journal/' + p.slug + '.html') })),
+    }],
+  })));
+}
+
+// ═══════════════════════════════════════════════════════ STATIC PAGES ══
+
+function buildPricing() {
+  const trail = [{ name: 'Home', path: '/' }, { name: 'Pricing', path: '/pricing.html' }];
+  const allFaqs = [
+    { q: 'Are these prices final?', a: 'They are the rates we quote from, and the figure on your written quote after the free site visit is the figure you pay, provided the scope does not change. If we open something up and find a genuinely different problem, we stop and tell you before doing anything that costs more.' },
+    { q: 'Why are painting prices a range rather than a number?', a: 'Because the condition of the existing surface is the biggest variable and it cannot be judged from a photograph. Painting over sound paint is a very different job from washing off distemper, scraping, crack filling and puttying. The site visit gives you a single number instead of a range.' },
+    { q: 'Do you charge for the site visit?', a: 'No. Inspection, measurement and the written quote are free across our coverage area, whether or not you go ahead.' },
+    { q: 'What are the payment terms?', a: business.paymentTerms },
+  ];
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'Rates',
+    h1: 'Our price list',
+    lede:
+      'Every rate we quote from, in one place. Cleaning rates are our published card. Painting and waterproofing are the prevailing Jalandhar and Punjab bands for 2026. <strong>The final figure is confirmed after a free site visit</strong> — because preparation, not the headline rate, is what actually changes a job.',
+    primary: { href: '/quote.html', label: 'Get my exact price' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body:
+      ui.sectionHead({ h2: 'Painting' }) +
+      ui.priceTable({ caption: serviceByKey.painting.priceCaption, rows: serviceByKey.painting.priceTable }) +
+      `<div class="center-actions"><a class="btn btn-outline" href="/painting-services-jalandhar.html">Full painting details</a></div>`,
+  })}
+
+${ui.section({
+    body:
+      ui.sectionHead({ h2: 'Cleaning and deep cleaning' }) +
+      ui.priceTable({ caption: serviceByKey.cleaning.priceCaption, rows: serviceByKey.cleaning.priceTable }) +
+      `<div class="center-actions"><a class="btn btn-outline" href="/cleaning-services-jalandhar.html">Full cleaning details</a></div>`,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body:
+      ui.sectionHead({ h2: 'Full house deep cleaning' }) +
+      ui.priceTable({ caption: serviceByKey.deepCleaning.priceCaption, rows: serviceByKey.deepCleaning.priceTable }) +
+      `<div class="center-actions"><a class="btn btn-outline" href="/deep-cleaning-services-jalandhar.html">Full deep cleaning details</a></div>`,
+  })}
+
+${ui.section({
+    body:
+      ui.sectionHead({ h2: 'Waterproofing' }) +
+      ui.priceTable({ caption: serviceByKey.waterproofing.priceCaption, rows: serviceByKey.waterproofing.priceTable }) +
+      `<div class="center-actions"><a class="btn btn-outline" href="/waterproofing-services-jalandhar.html">Full waterproofing details</a></div>`,
+  })}
+
+${ui.section({
+    tone: 'tone-tint',
+    body:
+      ui.sectionHead({ h2: 'What changes your price, honestly' }) +
+      ui.prose([
+        {
+          h2: 'The three variables that matter',
+          body:
+            '<p><strong>Preparation.</strong> This is the whole story for both painting and waterproofing. A sound surface is cheap and fast. A surface that needs washing off, scraping, filling, puttying or screed repair is none of those things — and skipping the preparation is exactly what makes a cheap quote turn into a peeling wall within a year.</p>' +
+            '<p><strong>Measured area.</strong> For painting we measure the wall surface, which is roughly 2.8 to 3.2 times your carpet area. For waterproofing we measure the slab plus the parapet line, the drain outlets and any wall junction that needs treatment. A quote built from a floor plan is a guess.</p>' +
+            '<p><strong>Access and height.</strong> Upper-floor exteriors, stairwells and double-height rooms need scaffolding, which is quoted as its own line rather than buried in the rate.</p>',
+        },
+        {
+          h2: 'What we will not do',
+          body:
+            '<p>We will not quote a flat per-sq-ft number for a surface we have not seen, and we will not tell you a wall can be painted when it is holding moisture. Both of those would make the quote easier to win and the job worse to own.</p>' +
+            '<p>If your terrace leak is a failed drain rather than the slab, we will tell you that a ₹3,000 repair is the answer and not sell you a ₹90,000 membrane. Being willing to talk you out of work is the thing worth checking for in any contractor, including us.</p>',
+        },
+      ]),
+  })}
+
+${tail({ faqs: allFaqs })}
+`;
+  page('pricing.html', renderPage(common({
+    title: 'Price List — Painting, Cleaning & Waterproofing in Jalandhar',
+    description:
+      'Full published rates for Jalandhar: painting from ₹12/sq ft, bathroom cleaning ₹890, 2 BHK deep clean ₹9,500, terrace waterproofing from ₹40/sq ft. No hidden extras.',
+    path: '/pricing.html',
+    body,
+    schema: [breadcrumbSchema(trail), faqSchema(allFaqs)],
+  })));
+}
+
+function buildFaqs() {
+  const trail = [{ name: 'Home', path: '/' }, { name: 'FAQs', path: '/faqs.html' }];
+  const all = [
+    { group: 'Booking and pricing', items: [
+      { q: 'Is the site visit really free?', a: 'Yes. Inspection, measurement and the written quote cost nothing across Jalandhar and roughly 40 km around it. We do not ask for a deposit to visit, and you are under no obligation afterwards.' },
+      { q: 'How is the final price decided?', a: 'From the published rate card plus what the site visit finds. For painting, that means the measured wall area and the condition of the existing surface. For waterproofing, the slab area, the drainage and how much preparation the surface needs. You get one fixed number in writing.' },
+      { q: 'What if the job turns out bigger than expected?', a: 'We stop and tell you before doing anything that costs more. Nothing gets added to the bill without your agreement. This happens most often when old paint hides a wall that needs full putty, or when a terrace slab needs more screed repair than was visible.' },
+      { q: 'What are your payment terms?', a: business.paymentTerms },
+      { q: 'Do you take card or UPI?', a: 'UPI, cash and bank transfer. We do not take card payments on site.' },
+    ]},
+    { group: 'Painting', items: [
+      { q: 'How many coats do you apply?', a: 'Two finish coats over a primer coat, as standard. Skipping or rushing coats is the most common cause of a patchy finish showing up a month later, so we do not compress them into a single long day.' },
+      { q: 'Can you match an existing colour?', a: 'Yes. Bring us the shade code or a sample and we will match it. If you do not have the code, a small physical sample of the painted surface is enough for us to match at a paint shop.' },
+      { q: 'Do you move furniture?', a: 'Yes. Furniture is moved to the centre of the room and covered with sheeting, floors are masked, and everything is put back at the end. All of it is included in the rate.' },
+      { q: 'What is the best season to paint in Jalandhar?', a: 'October to April. Paint applied to a wall holding monsoon moisture will blister and flake regardless of brand. Interior work can run year-round in a ventilated flat, but exterior painting and any freshly plastered wall should wait for dry weather.' },
+    ]},
+    { group: 'Cleaning', items: [
+      { q: 'Do I need to buy cleaning materials?', a: 'No. Crews bring machines, chemicals, cloths and mops. If you would prefer they use your own products, tell us when booking and they will.' },
+      { q: 'Will harsh chemicals damage my marble or taps?', a: 'Not the way we work. We never use acid on marble, granite or chrome — it etches stone permanently and strips chrome plating, and the damage shows up over the following weeks. Those surfaces get pH-neutral treatment even though it takes longer.' },
+      { q: 'How long does a deep clean take?', a: 'A bathroom is one to two hours, a kitchen two to three hours with the chimney, a 2 BHK full flat one full day with a two-person crew. A 3 or 4 BHK can take two days.' },
+      { q: 'Do you clean after construction?', a: 'Yes, at ₹12 per sq ft, and it is a genuinely different job — paint spatter, cement film and fine dust need different chemicals from a normal clean. Tell us it is post-construction when you book.' },
+    ]},
+    { group: 'Waterproofing and damp', items: [
+      { q: 'Why is my wall damp when there is no obvious leak?', a: 'Water travels before it shows. The usual cause in Jalandhar is a failed terrace parapet joint — water enters at the roof edge, gets under the surface and tracks sideways through the slab, appearing as a stain well away from the entry point. A plumbing leak in a shared shaft behaves the same way. Finding it reliably needs a moisture meter, which is why the inspection is free.' },
+      { q: 'Can I just paint over a damp patch?', a: 'Not while the source is active. The coating traps moisture, blisters within a season and takes plaster with it. The order is always: stop the water, let the wall dry, then treat and redecorate.' },
+      { q: 'How much does terrace waterproofing cost?', a: '₹40–₹100 per sq ft for most systems, with large flat areas from about ₹25. A 1,000 sq ft terrace is roughly ₹40,000–₹1,00,000. System choice and the amount of preparation are what drive the spread.' },
+      { q: 'Do you give a warranty?', a: 'Yes, in writing, for the specific system, conditional on the preparation being as specified. We name the system, thickness and coat count in the quote, because a warranty without a documented specification is not worth much.' },
+    ]},
+    { group: 'Coverage and practicalities', items: [
+      { q: 'Which areas do you cover?', a: 'Jalandhar city in full, plus Kapurthala, Phagwara, Nakodar, Hoshiarpur and villages within about 40 km. Site visits are free across that area.' },
+      { q: 'How far ahead should I book?', a: 'Cleaning is usually two to three days out. Painting and waterproofing follow the season — the pre-monsoon waterproofing window (February to May) and the pre-Diwali cleaning peak fill up a week or more ahead.' },
+      { q: 'Do you work on Sundays?', a: 'Yes. Most people are home at the weekend, so it is often the easiest slot to book.' },
+      { q: 'Do you do commercial work?', a: 'Yes — office and shop floor cleaning at ₹6–₹10 per sq ft for machine buffing, scheduled outside your opening hours. Painting and waterproofing for commercial premises are quoted on the same basis as residential.' },
+    ]},
+  ];
+  const flat = all.flatMap((g) => g.items);
+
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'Answers',
+    h1: 'Frequently asked questions',
+    lede: 'Everything customers ask us before booking, grouped by topic. If your question is not here, call or WhatsApp — we answer properly rather than sending a price list.',
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+${all
+    .map((g) =>
+      ui.section({ tone: 'tone-white', body: ui.faqs(g.items, g.group) })
+    )
+    .join('')}
+${tail({})}
+`;
+  page('faqs.html', renderPage(common({
+    title: 'FAQs — Painting, Cleaning & Waterproofing in Jalandhar',
+    description:
+      'Answers on pricing, booking, paint coats, cleaning chemicals, damp diagnosis and waterproofing warranties for Jalandhar homes. Call +91 99147 72275.',
+    path: '/faqs.html',
+    body,
+    schema: [breadcrumbSchema(trail), faqSchema(flat)],
+  })));
+}
+
+function buildAbout() {
+  const trail = [{ name: 'Home', path: '/' }, { name: 'About us', path: '/about.html' }];
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'About',
+    h1: 'A local crew for the jobs a house actually needs',
+    lede:
+      'We paint, deep clean and waterproof homes across Jalandhar and the towns around it. Same crews, same rate card, same standard whether the job is a single bathroom or a whole terrace.',
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body: ui.prose([
+      {
+        h2: 'Why we publish our rates',
+        body:
+          '<p>Because the alternative wastes your time. Most people calling a painter or a waterproofing contractor in Jalandhar get "we will come and see" and then a number that changes once work has started. The published rate card here exists so you can tell in a minute whether we are in your budget, before anyone drives anywhere.</p>' +
+          '<p>The site visit still matters — it is how we turn a range into one fixed number — but it is free, and you get the measurements and findings whether or not you hire us.</p>',
+      },
+      {
+        h2: 'How we are set up',
+        body:
+          '<p>Crews are ours and work under supervision. They arrive with their own machines, extension boards and chemicals rather than borrowing from your house, and they are not subcontracted out to whoever is available that morning.</p>' +
+          '<p>For painting and waterproofing we supply materials at trade rates with the brand, product and coat count named on your quote. If you would rather buy your own paint, we will give you the litre count per room and quote labour separately.</p>',
+      },
+      {
+        h2: 'The things we will turn down',
+        body:
+          '<p>A few jobs we decline, and it is worth saying so plainly:</p>' +
+          '<ul>' +
+          '<li><strong>Painting wet walls or exteriors in the monsoon.</strong> It will fail and you will have paid for it.</li>' +
+          '<li><strong>Waterproofing without fixing the drainage.</strong> A membrane under permanently standing water is money thrown away.</li>' +
+          '<li><strong>Painting over a damp patch with waterproof paint.</strong> It traps the moisture, blisters within a season and takes the plaster with it.</li>' +
+          '<li><strong>Jobs beyond about 40 km.</strong> We would rather decline than do a rushed job.</li>' +
+          '</ul>' +
+          '<p>Turning work down costs us money in the short term. It is also the reason customers call us back, and the reason our quotes do not grow once work starts.</p>',
+      },
+      {
+        h2: 'What we are not',
+        body:
+          '<p>We are a service-area business — we come to you, and there is no showroom to visit. That is normal for this trade, and it means the things worth judging us on are the written quote, the crew that turns up and the walkthrough at the end.</p>' +
+          '<p>' + business.responsePromise + '</p>',
+      },
+    ]),
+  })}
+
+${ui.section({
+    body: ui.sectionHead({ h2: 'What we do' }) + ui.serviceCards(),
+  })}
+
+${tail({ faqs: [
+      { q: 'How long have you been operating?', a: 'Rather than quote a number here, ask us on the call and we will tell you directly — along with recent jobs in your area that you are welcome to look at.' },
+      { q: 'Can I see examples of your work?', a: 'Yes. Ask on the call and we will point you at recent local jobs. For painting we can usually show you a shade and finish in person, which is more useful than a photograph anyway.' },
+      { q: 'Are your crews insured?', a: 'Crews work under our supervision rather than as independent subcontractors. Ask on the call if you need specifics before booking.' },
+      { q: 'Do you have a shop I can visit?', a: 'No — we are a service-area business, so everything happens at your property. The site visit is free and is the right time to ask us anything face to face.' },
+    ] })}
+`;
+  page('about.html', renderPage(common({
+    title: 'About Jalandhar Services — Painting, Cleaning & Waterproofing',
+    description:
+      'A local Jalandhar crew for painting, deep cleaning and waterproofing. Published rates, own equipment, fixed written quotes and the jobs we will turn down.',
+    path: '/about.html',
+    body,
+    schema: [breadcrumbSchema(trail), {
+      '@type': 'AboutPage',
+      name: 'About ' + business.name,
+      url: abs('/about.html'),
+    }],
+  })));
+}
+
+function buildContact() {
+  const trail = [{ name: 'Home', path: '/' }, { name: 'Contact', path: '/contact.html' }];
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'Contact',
+    h1: 'Talk to us',
+    lede:
+      'Call or WhatsApp and you will get a real answer — what the job involves, roughly what it costs, and when we can come. No call centre and no script.',
+    primary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    secondary: { href: 'https://wa.me/' + business.whatsapp, label: 'WhatsApp us' },
+    compact: true,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body: `<div class="contact-grid">
+      <div class="contact-card reveal">
+        <h2>Phone</h2>
+        <a class="contact-big" href="tel:${business.phoneTel}">${business.phoneDisplay}</a>
+        <p>The fastest way to get an answer, especially for anything urgent like an active leak.</p>
+      </div>
+      <div class="contact-card reveal" data-delay="1">
+        <h2>WhatsApp</h2>
+        <a class="contact-big" href="https://wa.me/${business.whatsapp}" rel="noopener">Message us</a>
+        <p>Best for photos. A picture of the damp patch, the terrace or the room you want painted tells us more than a paragraph.</p>
+      </div>
+      <div class="contact-card reveal" data-delay="2">
+        <h2>Coverage</h2>
+        <p class="contact-big-sm">${business.coverageLine}</p>
+        <p>Site visits are free anywhere in that area. Tell us your locality when you call and we will confirm.</p>
+      </div>
+      <div class="contact-card reveal" data-delay="3">
+        <h2>Hours</h2>
+        <p class="contact-big-sm">Every day, 8am – 8pm</p>
+        <p>We take bookings on Sundays. If you call outside these hours, leave a message with your number and we will return it the next morning.</p>
+      </div>
+    </div>
+    <div class="center-actions"><a class="btn btn-primary" href="/quote.html">Or send a quote request</a></div>`,
+  })}
+
+${tail({ faqs: [
+      { q: 'How quickly will you reply?', a: business.responsePromise },
+      { q: 'Should I call or use the form?', a: 'Call if it is urgent — an active leak, or water coming in during rain. Use the form or WhatsApp if you want a quote and are not in a hurry; a photo attached to WhatsApp is the most useful thing you can send us.' },
+      { q: 'What should I have ready when I call?', a: 'Your locality, roughly what the job is, and the size if you know it. For damp problems, when it gets worse — after rain, after using the bathroom, or in cold weather — narrows the cause before we even visit.' },
+      { q: 'Do you visit on Sundays?', a: 'Yes. Most people are home at the weekend, so it is often the easiest time to do a site visit.' },
+    ] })}
+`;
+  page('contact.html', renderPage(common({
+    title: 'Contact Us — Painting, Cleaning & Waterproofing in Jalandhar',
+    description:
+      'Call or WhatsApp +91 99147 72275 for painting, deep cleaning and waterproofing in Jalandhar. Free site visit, same-day reply, coverage across 40 km.',
+    path: '/contact.html',
+    body,
+    schema: [breadcrumbSchema(trail), {
+      '@type': 'ContactPage',
+      name: 'Contact ' + business.name,
+      url: abs('/contact.html'),
+    }],
+  })));
+}
+
+function buildQuote() {
+  const body = `
+${ui.hero({
+    kicker: 'Free quote',
+    h1: 'Get a fixed quote for your home',
+    lede:
+      'Tell us what you need and we will call you back — usually the same day. Four fields is enough to start; the detail gets sorted on the phone or at the free site visit.',
+    primary: { href: 'tel:' + business.phoneTel, label: 'Or just call ' + business.phoneDisplay },
+    secondary: { href: 'https://wa.me/' + business.whatsapp, label: 'WhatsApp instead' },
+    compact: true,
+  })}
+
+${ui.section({
+    tone: 'tone-white',
+    body: `<div class="form-wrap reveal">
+    <form id="quoteForm" class="quote-form" data-endpoint="/api/inquiry" data-wa="${business.whatsapp}" novalidate>
+      <div class="field">
+        <label for="f-name">Your name <span aria-hidden="true">*</span></label>
+        <input id="f-name" name="name" type="text" autocomplete="name" required>
+      </div>
+      <div class="field">
+        <label for="f-phone">Phone number <span aria-hidden="true">*</span></label>
+        <input id="f-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="10-digit mobile" required>
+      </div>
+      <div class="field">
+        <label for="f-area">Your area</label>
+        <input id="f-area" name="area" type="text" placeholder="e.g. Model Town, Kapurthala" autocomplete="address-level2">
+      </div>
+      <div class="field">
+        <label for="f-service">What do you need?</label>
+        <select id="f-service" name="service">
+          <option value="">Choose a service</option>
+          ${services.map((s) => `<option value="${s.name}">${s.name}</option>`).join('')}
+          <option value="Something else">Something else</option>
+        </select>
+      </div>
+      <div class="field field-wide">
+        <label for="f-details">Anything else we should know?</label>
+        <textarea id="f-details" name="details" rows="4" placeholder="Size of the flat, how many bathrooms, what the problem looks like — whatever you have."></textarea>
+      </div>
+      <div class="field field-wide form-actions">
+        <button class="btn btn-primary" type="submit">Send my request</button>
+        <p class="form-note">We use your details to quote for the work and nothing else. No marketing lists.</p>
+      </div>
+      <p id="quoteStatus" class="form-status" hidden role="status" aria-live="polite"></p>
+    </form>
+    <aside class="form-aside reveal" data-delay="1">
+      <h2>What happens next</h2>
+      <ol class="mini-steps">
+        <li>We call you back, usually within a few hours.</li>
+        <li>We arrange a free site visit at a time that suits you.</li>
+        <li>You get a fixed written quote — measurements, products and scope.</li>
+        <li>You decide. No pressure and no deposit to get the quote.</li>
+      </ol>
+      <p class="aside-note">In a hurry? <a href="tel:${business.phoneTel}">Call ${business.phoneDisplay}</a> — it is the fastest route, especially for an active leak.</p>
+    </aside>
+  </div>`,
+  })}
+
+${tail({ faqs: [
+      { q: 'Is the quote really free?', a: 'Yes, including the site visit and the measurements. There is no deposit to get a quote and no obligation afterwards.' },
+      { q: 'How soon will you call?', a: business.responsePromise },
+      { q: 'What if I do not know exactly what I need?', a: 'That is common and it is fine. Describe the problem — a damp patch, a flat that needs painting, a kitchen that needs a deep clean — and we will work out the scope with you at the site visit.' },
+      { q: 'Do you share my number with anyone?', a: 'No. We use it to contact you about this job and nothing else. We do not run marketing lists or pass details to third parties.' },
+    ] })}
+`;
+  page('quote.html', renderPage(common({
+    title: 'Get a Free Quote — Painting, Cleaning & Waterproofing',
+    description:
+      'Request a free quote for painting, deep cleaning or waterproofing in Jalandhar. Free site visit, fixed written price, same-day callback. Call +91 99147 72275.',
+    path: '/quote.html',
+    body,
+    noindex: true,
+    schema: [],
+  })));
+}
+
+function buildOurWork() {
+  const trail = [{ name: 'Home', path: '/' }, { name: 'Our work', path: '/our-work.html' }];
+  const body = `
+${crumbs(trail)}
+${ui.hero({
+    kicker: 'Our work',
+    h1: 'What the work looks like',
+    lede:
+      'We are a service-area business, so this page is built from job types rather than a showroom. Ask on the call and we will point you at a recent job near you — for painting, seeing a finish in person beats any photograph.',
+    primary: { href: '/quote.html', label: 'Get a free quote' },
+    secondary: { href: 'tel:' + business.phoneTel, label: 'Call ' + business.phoneDisplay },
+    compact: true,
+  })}
+
+<section class="notice-band"><div class="wrap">
+  <p><strong>Photographs are coming.</strong> We are collecting before-and-after images from recent jobs with the owners' permission. Until they are up, call us and we will send you pictures of work near you directly — that is faster and more honest than stock photography.</p>
+</div></section>
+
+${ui.section({
+    tone: 'tone-white',
+    body:
+      ui.sectionHead({ h2: 'The jobs we do most', sub: 'Representative scopes, so you can see what each one actually involves.' }) +
+      `<div class="job-grid">
+        ${[
+          { t: '2 BHK repaint, Model Town', d: 'Interior emulsion throughout, ceilings included, two bedrooms with a feature wall. Crack filling and full putty because the previous coat was distemper. Five working days.', k: 'Painting' },
+          { t: 'Terrace waterproofing, Urban Estate', d: 'A 900 sq ft terrace with a leaking parapet junction and a blocked drain. Drain re-set, fillets formed at the wall line, 3 mm APP membrane. Four days including curing.', k: 'Waterproofing' },
+          { t: 'Move-out deep clean, Nakodar Road', d: 'A 2 BHK handed back to a landlord. Chimney degreased, both bathrooms descaled, floors machine-scrubbed, windows and balcony done. One full day.', k: 'Deep cleaning' },
+          { t: 'Damp treatment, Hoshiarpur', d: 'A bedroom wall with a tide mark and efflorescence. Source traced to a failed terrace joint one floor up and a cracked drainpipe. Source repaired, wall dried, then treated and repainted.', k: 'Waterproofing' },
+          { t: 'Kitchen and bathroom reset, Kapurthala', d: 'A house that had not had a deep clean in years. Chimney, hob and backsplash degreased, three bathrooms descaled including shower screens and grout. Two days.', k: 'Deep cleaning' },
+          { t: 'Kothi exterior, Model Town', d: 'A large elevation with algae staining on the shaded north wall. Pressure washed, treated, exterior primer and two coats of weatherproof emulsion. Scaffolding required for the upper floor.', k: 'Painting' },
+        ]
+          .map(
+            (j, i) => `<article class="job-card reveal" data-delay="${i % 3}">
+          <span class="job-tag">${j.k}</span>
+          <h3>${j.t}</h3>
+          <p>${j.d}</p>
+        </article>`
+          )
+          .join('')}
+      </div>`,
+  })}
+
+${ui.section({ body: ui.sectionHead({ h2: 'See the rates behind these jobs' }) + ui.serviceCards() })}
+
+${tail({ faqs: [
+      { q: 'Can I see a job you have done nearby?', a: 'Often, yes — with the owner’s permission. Ask on the call and we will tell you honestly what is available near you. For painting it is the best way to judge a finish, better than any photograph.' },
+      { q: 'Why are there no photos on this page yet?', a: 'Because we would rather show you real jobs than stock images that are not ours. We are collecting before-and-after photographs with owners’ consent. In the meantime, ask and we will send you pictures of work near you directly.' },
+      { q: 'Do you have references?', a: 'Yes. Ask on the call and we will put you in touch with recent customers in your area where they have agreed to it.' },
+    ] })}
+`;
+  page('our-work.html', renderPage(common({
+    title: 'Our Work — Painting, Cleaning & Waterproofing, Jalandhar',
+    description:
+      'Representative painting, deep cleaning and waterproofing jobs across Jalandhar — what each scope involved and how long it took. Ask for photos of work near you.',
+    path: '/our-work.html',
+    body,
+    schema: [breadcrumbSchema(trail)],
+  })));
+}
+
+function buildLegal(slug, title, h1, sections, description) {
+  const trail = [{ name: 'Home', path: '/' }, { name: title, path: '/' + slug + '.html' }];
+  const body = `
+${crumbs(trail)}
+${ui.section({
+    tone: 'tone-white',
+    body: `<div class="legal">
+    <h1>${h1}</h1>
+    <p class="legal-updated">Last updated ${dateLong('2026-09-23')}</p>
+    ${ui.prose(sections)}
+    </div>`,
+  })}
+${ui.ctaBand({ h2: 'Questions about this?', p: 'Call us and we will answer directly.' })}
+`;
+  page(slug + '.html', renderPage(common({
+    title,
+    description,
+    path: '/' + slug + '.html',
+    noindex: true,
+    body,
+    schema: [breadcrumbSchema(trail)],
+  })));
+}
+
+function build404() {
+  const body = `
+${ui.section({
+    tone: 'tone-white',
+    body: `<div class="err">
+    <p class="kicker">404</p>
+    <h1>That page isn't here</h1>
+    <p class="lede">The link may be old or mistyped. These are the pages most people are looking for:</p>
+    <div class="link-row">
+      ${services.map((s) => `<a class="pill-link" href="/${s.slug}.html">${s.name}</a>`).join('')}
+      <a class="pill-link" href="/pricing.html">Price list</a>
+      <a class="pill-link" href="/service-areas.html">Service areas</a>
+      <a class="pill-link" href="/contact.html">Contact</a>
+    </div>
+    <div class="center-actions"><a class="btn btn-primary" href="/">Back to the homepage</a></div>
+    </div>`,
+  })}`;
+  page('404.html', renderPage(common({
+    title: 'Page not found | ' + business.name,
+    description: 'That page could not be found. Browse our painting, cleaning and waterproofing services in Jalandhar instead.',
+    path: '/404.html',
+    noindex: true,
+    body,
+    schema: [],
+  })));
+}
+
+// ═══════════════════════════════════════════════════ FILES AT THE ROOT ══
+
+function buildRootFiles() {
+  const urls = written.filter((u) => u !== '/404.html' && u !== '/quote.html' && u !== '/privacy.html' && u !== '/terms.html');
+
+  const today = '2026-09-23';
+  const priority = (u) => {
+    if (u === '/') return '1.0';
+    if (services.some((s) => '/' + s.slug + '.html' === u)) return '0.9';
+    if (u === '/pricing.html' || u === '/contact.html' || u === '/service-areas.html') return '0.9';
+    if (u.startsWith('/journal/')) return '0.6';
+    return '0.7';
+  };
+
+  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls
+    .map(
+      (u) => `  <url>
+    <loc>${abs(u)}</loc>
+    <lastmod>${today}</lastmod>
+    <priority>${priority(u)}</priority>
+  </url>`
+    )
+    .join('\n')}
+</urlset>
+`;
+  fs.writeFileSync(path.join(DIST, 'sitemap.xml'), sitemap);
+
+  // Content signals mirror the policy already chosen for the owner's other
+  // site: be found and cited by AI answer engines, but do not donate the
+  // content to model training. ai-input=yes is the load-bearing value.
+  fs.writeFileSync(path.join(DIST, 'robots.txt'), `# ${business.name}
+User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no, use=reference
+Allow: /
+Disallow: /assets/generated/
+
+Sitemap: ${abs('/sitemap.xml')}
+`);
+
+  fs.writeFileSync(path.join(DIST, '_headers'), `/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+  Strict-Transport-Security: max-age=15552000; includeSubDomains
+  Link: </sitemap.xml>; rel="describedby"
+
+/assets/generated/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/sitemap.xml
+  Content-Type: application/xml; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/llms.txt
+  Content-Type: text/plain; charset=utf-8
+`);
+
+  fs.writeFileSync(path.join(DIST, 'llms.txt'), `# ${business.name}
+
+> ${business.tagline}. Service-area business covering ${business.coverageLine}. Free site visits and fixed written quotes.
+
+## Services
+${services.map((s) => `- [${s.name}](${abs('/' + s.slug + '.html')}): ${s.description}`).join('\n')}
+
+## Service areas
+${areas.map((a) => `- [${a.name}](${abs('/' + a.slug + '.html')}): ${a.description}`).join('\n')}
+
+## Guides
+${posts.map((p) => `- [${p.h1}](${abs('/journal/' + p.slug + '.html')})`).join('\n')}
+
+## Contact
+- Phone and WhatsApp: ${business.phoneDisplay}
+- Quote requests: ${abs('/quote.html')}
+- Coverage: ${business.coverageLine}
+- Site visits and written quotes are free.
+`);
+
+  fs.writeFileSync(path.join(DIST, 'robots.txt.keep'), '');
+  fs.rmSync(path.join(DIST, 'robots.txt.keep'));
+}
+
+// ══════════════════════════════════════════════════════════════════ BUILD ══
+
+buildHome();
+services.forEach(buildServiceHub);
+subServices.forEach(buildSubService);
+areas.forEach(buildAreaPage);
+buildAreasHub();
+posts.forEach(buildPost);
+buildJournal();
+buildPricing();
+buildFaqs();
+buildAbout();
+buildContact();
+buildQuote();
+buildOurWork();
+buildLegal('privacy', 'Privacy Policy | ' + business.name, 'Privacy policy', [
+  {
+    h2: 'What we collect',
+    body: '<p>When you call, message or submit the quote form, we collect your name, phone number, the area you are in, the service you asked about and anything you choose to tell us about the job. If you send photographs over WhatsApp, we receive those too.</p><p>We do not run a customer account system, and we do not collect payment details on this website.</p>',
+  },
+  {
+    h2: 'What we do with it',
+    body: '<p>We use your details to contact you about the job you asked about, to arrange a site visit, and to prepare and follow up a quote. That is all.</p><p>We do not sell your details, and we do not add you to a marketing list.</p>',
+  },
+  {
+    h2: 'Who else sees it',
+    body: '<p>Quote requests submitted through the form are delivered to us by email and messaging services acting as our processors. Our hosting provider processes standard web server logs. We do not share your details with any other third party except where we are legally required to.</p>',
+  },
+  {
+    h2: 'How long we keep it',
+    body: '<p>Enquiries that do not lead to work are kept for twelve months so we can pick up the conversation if you come back. Records relating to work we carried out are kept for as long as we need them for warranty and accounting purposes.</p>',
+  },
+  {
+    h2: 'Your choices',
+    body: `<p>You can ask us to delete your details at any time by calling ${business.phoneDisplay}. If you have asked us not to contact you again, we will keep only the minimum needed to honour that request.</p>`,
+  },
+  {
+    h2: 'Cookies and analytics',
+    body: '<p>This site sets no advertising or tracking cookies. We do not run third-party analytics scripts on it.</p>',
+  },
+], 'How we handle the details you give us when you request a quote, and what we do not do with them.');
+
+buildLegal('terms', 'Terms of Service | ' + business.name, 'Terms of service', [
+  {
+    h2: 'Quotes and pricing',
+    body: '<p>Rates published on this website are indicative and are the rates we quote from. A quote becomes binding once it is issued to you in writing after a site visit and you accept it.</p><p>A written quote holds for 30 days unless it states otherwise. Materials pricing in particular can move, and a quote for painting or waterproofing may be revised if the material costs change before work begins — we will tell you before starting, never after.</p>',
+  },
+  {
+    h2: 'Scope changes',
+    body: '<p>If work reveals a problem that was not visible when we quoted — a wall needing full putty, a slab needing more screed repair, a hidden plumbing leak — we stop and tell you what it would cost to address before doing anything further. Nothing is added to your bill without your agreement.</p>',
+  },
+  {
+    h2: 'Payment',
+    body: `<p>${business.paymentTerms}</p><p>We accept UPI, cash and bank transfer. The balance is due after the walkthrough at completion, not before.</p>`,
+  },
+  {
+    h2: 'Workmanship and warranty',
+    body: '<p>We stand behind the work we do. Where a warranty is offered for a specific system, it is stated in your written quote along with the system, materials and preparation it assumes, and it is conditional on those being as specified.</p><p>Warranties do not cover damage from causes outside our work — structural movement, a subsequent plumbing leak, water ingress from a neighbouring property, or alterations made by others after we finish.</p>',
+  },
+  {
+    h2: 'Access and site conditions',
+    body: '<p>You agree to provide safe access to the areas being worked on, and to tell us in advance about any known hazard — asbestos-containing material, unstable structures, live electrical work, or anything else that affects how the job must be done.</p><p>Where scaffolding is required, it is quoted as a separate line. Where we cannot work safely, we will stop and discuss it with you.</p>',
+  },
+  {
+    h2: 'Cancellation',
+    body: '<p>You can cancel or reschedule a booking at no charge with reasonable notice — a day or more for cleaning, and as much notice as possible for painting and waterproofing where materials may already be ordered. If materials have been bought specifically for your job, we may ask you to cover their cost.</p>',
+  },
+  {
+    h2: 'Weather-dependent work',
+    body: '<p>Exterior painting and waterproofing depend on dry conditions and adequate curing time. If the weather turns, we will reschedule rather than apply a coating that will fail. This is not a cancellation on our part — it is the job being done properly.</p>',
+  },
+  {
+    h2: 'Governing law',
+    body: '<p>These terms are governed by Indian law, and disputes fall under the jurisdiction of the courts at Jalandhar, Punjab.</p>',
+  },
+], 'The terms that apply to quotes, bookings, payment and warranty for work carried out by ' + business.name + '.');
+build404();
+buildRootFiles();
+
+console.log(`Built ${written.length} pages → dist/`);
+console.log(`  css: ${CSS}`);
+console.log(`  js:  ${JS}`);
