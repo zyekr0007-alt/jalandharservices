@@ -86,4 +86,27 @@ export const brand = {
   },
 };
 
-export const abs = (path) => new URL(path.replace(/^\//, ''), business.url + '/').href;
+/**
+ * Absolute production URL for a built file path.
+ *
+ * ⚠️ Strips `.html`. Cloudflare Pages serves `/pricing.html` at `/pricing` and
+ * 308-redirects the `.html` form, so a canonical or sitemap entry naming
+ * `.html` points at a redirect — which Google reports as "Page with redirect"
+ * and declines to index. The extensionless form is the URL that actually
+ * returns 200, so that is the one every canonical, sitemap entry and schema
+ * node must name.
+ *
+ * `/index.html` collapses to `/` (Pages serves it at both).
+ */
+export const abs = (path) => {
+  const clean = String(path)
+    .replace(/\/index\.html$/, '/')
+    .replace(/\.html$/, '');
+  return new URL(clean.replace(/^\//, ''), business.url + '/').href;
+};
+
+/** Site-relative form of the same rule, for href attributes. */
+export const href = (path) =>
+  String(path)
+    .replace(/\/index\.html$/, '/')
+    .replace(/\.html$/, '');

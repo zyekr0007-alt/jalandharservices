@@ -60,10 +60,30 @@ for (const dir of STATIC) {
 // ───────────────────────────────────────────────────────────────── helpers ──
 
 const written = [];
+
+/**
+ * Rewrite every emitted URL to its extensionless form.
+ *
+ * Cloudflare Pages serves `dist/pricing.html` at `/pricing` and 308-redirects
+ * `/pricing.html` there. So a link, canonical or schema node naming `.html`
+ * sends both visitors and crawlers through a redirect on every single request.
+ * Files stay as `.html` on disk; only the URLs they advertise change.
+ *
+ * Two patterns cover everything the generator emits:
+ *   1. absolute production URLs — canonical, og:url, and every JSON-LD url/@id
+ *   2. site-relative href attributes — nav, footer, cards, breadcrumbs
+ */
+function cleanUrls(html) {
+  return html
+    .replace(/https:\/\/jalandharservices\.in(\/[^"'\s<>]*)\.html/g,
+             'https://jalandharservices.in$1')
+    .replace(/href="(\/[^"]*)\.html"/g, 'href="$1"');
+}
+
 function page(relPath, html) {
   const out = path.join(DIST, relPath);
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, html);
+  fs.writeFileSync(out, cleanUrls(html));
   written.push('/' + relPath);
 }
 

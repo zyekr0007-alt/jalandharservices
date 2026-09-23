@@ -32,11 +32,14 @@ function walk(dir, out = []) {
 const all = walk(DIST);
 const htmlFiles = all.filter((f) => f.endsWith('.html'));
 const rel = (f) => '/' + path.relative(DIST, f);
+// A public URL is extensionless (`/pricing`) and maps to `dist/pricing.html`.
+// Resolve all three shapes so a link is only "broken" if nothing serves it.
 const exists = (urlPath) => {
   const clean = urlPath.split('#')[0].split('?')[0];
   if (clean === '/') return fs.existsSync(path.join(DIST, 'index.html'));
   const direct = path.join(DIST, clean);
   if (fs.existsSync(direct) && fs.statSync(direct).isFile()) return true;
+  if (fs.existsSync(direct + '.html')) return true;
   if (fs.existsSync(path.join(DIST, clean.replace(/^\//, ''), 'index.html'))) return true;
   return false;
 };
@@ -88,8 +91,23 @@ for (const file of htmlFiles) {
     if (!canonical.startsWith('https://jalandharservices.in')) {
       fail(`${url}: canonical is not on the production host — ${canonical}`);
     }
-    const want = url === '/index.html' ? 'https://jalandharservices.in/' : 'https://jalandharservices.in' + url;
+    // Canonicals must name the extensionless URL — Cloudflare Pages 308s the
+    // `.html` form, and a canonical pointing at a redirect is not indexed.
+    const want =
+      'https://jalandharservices.in' +
+      (url === '/index.html' ? '/' : url.replace(/\.html$/, ''));
     if (canonical !== want) fail(`${url}: canonical mismatch — expected ${want}, got ${canonical}`);
+    if (/\.html$/.test(canonical)) fail(`${url}: canonical ends in .html and will 308`);
+  }
+
+  // ── no emitted URL may name a .html file ─────────────────────────────
+  // This is the regression guard for the Pages clean-URL behaviour. It caught
+  // a live deploy where all 32 sitemap URLs 308'd instead of returning 200.
+  for (const [, href] of html.matchAll(/(?:href|content)="(https:\/\/jalandharservices\.in[^"]*\.html)"/g)) {
+    fail(`${url}: emitted URL ends in .html and will 308 — ${href}`);
+  }
+  for (const [, href] of html.matchAll(/href="(\/[^"]*\.html)"/g)) {
+    fail(`${url}: internal link ends in .html and will 308 — ${href}`);
   }
 
   // ── JSON-LD ──────────────────────────────────────────────────────────
@@ -141,9 +159,10 @@ else {
     htmlFiles
       .filter((f) => /<meta name="robots" content="noindex/.test(fs.readFileSync(f, 'utf8')))
       .map(rel)
-      .map((u) => 'https://jalandharservices.in' + (u === '/index.html' ? '/' : u))
+      .map((u) => 'https://jalandharservices.in' + (u === '/index.html' ? '/' : u.replace(/\.html$/, '')))
   );
   for (const loc of locs) {
+    if (/\.html$/.test(loc)) fail(`sitemap.xml entry ends in .html and will 308: ${loc}`);
     if (noindexUrls.has(loc)) fail(`sitemap.xml lists a noindex page: ${loc}`);
     const p = loc.replace('https://jalandharservices.in', '') || '/';
     if (!exists(p)) fail(`sitemap.xml entry 404s: ${loc}`);
