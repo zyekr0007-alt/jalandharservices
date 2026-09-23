@@ -687,3 +687,117 @@ a.pill-link:hover { transform: translateY(-2px); border-color: var(--accent); co
 }
 .prose-block table.rate-card th, .prose-block table.rate-card td { padding: 11px 16px; }
 .prose-block table.rate-card thead th { background: rgba(12, 21, 36, .035); }
+
+/* ============================================================================
+   Before/after comparison slider
+   `--p` is the reveal position. See ui.mjs beforeAfter() for the markup note.
+   ========================================================================= */
+
+.ba-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+}
+.ba-figure { margin: 0; }
+
+.ba {
+  position: relative;
+  aspect-ratio: 486 / 735;
+  overflow: hidden;
+  border-radius: var(--r);
+  background: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-s);
+  transition: box-shadow .3s var(--ease-out), transform .3s var(--ease-out);
+  touch-action: pan-y;
+}
+.ba-figure:hover .ba { transform: translateY(-4px); box-shadow: var(--shadow-m); }
+
+.ba-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  user-select: none; -webkit-user-drag: none;
+}
+/* The after image is the base layer; the before is clipped back to --p. */
+.ba-before { clip-path: inset(0 calc(100% - var(--p, 50%)) 0 0); }
+
+.ba-handle {
+  position: absolute; top: 0; bottom: 0;
+  left: var(--p, 50%);
+  width: 3px; margin-left: -1.5px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(12, 21, 36, .18), 0 2px 12px rgba(12, 21, 36, .4);
+  display: grid; place-items: center;
+  pointer-events: none;
+}
+.ba-handle svg {
+  width: 34px; height: 34px; padding: 8px;
+  border-radius: 50%;
+  background: #fff; color: var(--ink);
+  box-shadow: 0 2px 10px rgba(12, 21, 36, .3);
+}
+
+.ba-tag {
+  position: absolute; top: 12px;
+  padding: 4px 10px; border-radius: var(--r-pill);
+  font-size: .68rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  background: rgba(12, 21, 36, .72); color: #fff;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+.ba-tag-l { left: 12px; }
+.ba-tag-r { right: 12px; }
+
+/* Invisible full-size control: click to position, drag, and arrow keys all work. */
+.ba-range {
+  position: absolute; inset: 0; z-index: 3;
+  width: 100%; height: 100%; margin: 0; padding: 0;
+  opacity: 0; cursor: ew-resize;
+  -webkit-appearance: none; appearance: none; background: transparent;
+}
+.ba-range:focus-visible { opacity: 1; }
+.ba-range:focus-visible::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 46px; height: 100%;
+  background: rgba(31, 90, 246, .3); border-radius: 6px;
+}
+
+.ba-figure figcaption { padding: 14px 2px 0; }
+.ba-figure figcaption strong { display: block; font-size: .96rem; margin-bottom: 3px; }
+.ba-figure figcaption span { display: block; font-size: .87rem; color: var(--muted); line-height: 1.55; }
+
+@media (max-width: 560px) {
+  .ba-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .ba-handle svg { width: 28px; height: 28px; padding: 6px; }
+  .ba-figure figcaption span { display: none; }
+}
+
+/* Service illustration */
+.svc-shot { margin: 0 0 26px; }
+.svc-shot img {
+  width: 100%; height: auto; border-radius: var(--r-lg);
+  border: 1px solid var(--line); box-shadow: var(--shadow-m);
+  aspect-ratio: 1200 / 750; object-fit: cover;
+}
+
+/* Illustration strip (cleaning hub) */
+.svc-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.svc-tile { margin: 0; }
+.svc-tile img {
+  width: 100%; height: auto; aspect-ratio: 560 / 350; object-fit: cover;
+  border-radius: var(--r); border: 1px solid var(--line);
+  transition: transform .3s var(--ease-out), box-shadow .3s var(--ease-out);
+}
+.svc-tile:hover img { transform: translateY(-3px); box-shadow: var(--shadow-m); }
+.svc-tile figcaption {
+  padding-top: 9px; font-size: .86rem; font-weight: 700; color: var(--ink-2); text-align: center;
+}
+
+/* Home gallery preview */
+.ba-preview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 760px) { .ba-preview { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px) { .ba-preview { grid-template-columns: 1fr; } }

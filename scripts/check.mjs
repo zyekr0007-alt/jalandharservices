@@ -140,6 +140,12 @@ for (const file of htmlFiles) {
     if (/^(https?:|data:)/.test(src)) continue;
     if (!exists(src)) fail(`${url}: broken asset reference → ${src}`);
   }
+  // og:image is served to social crawlers, never rendered in the page, so a
+  // missing file is invisible in a browser and shows as a blank preview card.
+  for (const [, og] of html.matchAll(/property="og:image" content="([^"]+)"/g)) {
+    const p = og.replace('https://jalandharservices.in', '');
+    if (!exists(p)) fail(`${url}: og:image does not exist → ${og}`);
+  }
 
   // ── accessibility basics ─────────────────────────────────────────────
   for (const [tag] of html.matchAll(/<img[^>]*>/g)) {

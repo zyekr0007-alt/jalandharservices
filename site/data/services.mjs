@@ -87,6 +87,7 @@ export const services = [
   {
     key: 'cleaning',
     slug: 'cleaning-services-jalandhar',
+    image: { slug: 'full-house', alt: 'A bright, freshly cleaned living space with a sofa, side table and clear floors' },
     name: 'Cleaning Services',
     shortName: 'Cleaning',
     accent: 'cleaning',
@@ -156,12 +157,21 @@ export const services = [
     ],
     related: ['deep-cleaning-services-jalandhar', 'painting-services-jalandhar', 'bathroom-deep-cleaning-jalandhar'],
     subSlugs: ['bathroom-deep-cleaning-jalandhar', 'kitchen-deep-cleaning-jalandhar', 'sofa-carpet-cleaning-jalandhar'],
+    gallery: [
+      { slug: 'bathroom', alt: 'A clean modern bathroom with wall tiles and polished chrome fittings', label: 'Bathroom' },
+      { slug: 'kitchen', alt: 'A clean modern kitchen with fitted cabinets, a hob and a chimney hood', label: 'Kitchen' },
+      { slug: 'sofa', alt: 'A clean fabric sofa in a bright living room', label: 'Sofa & upholstery' },
+      { slug: 'ac', alt: 'A split air-conditioning unit on a clean wall', label: 'Air conditioner' },
+      { slug: 'chimney', alt: 'A kitchen chimney hood over a hob, degreased and clean', label: 'Chimney' },
+      { slug: 'full-house', alt: 'A bright, fully cleaned home interior', label: 'Full house' },
+    ],
   },
 
   // ────────────────────────────────────────────────────────── DEEP CLEANING ──
   {
     key: 'deepCleaning',
     slug: 'deep-cleaning-services-jalandhar',
+    image: { slug: 'full-house', alt: 'A bright, freshly deep-cleaned room with clear surfaces and clean floors' },
     name: 'Deep Cleaning Services',
     shortName: 'Deep Cleaning',
     accent: 'deepCleaning',
@@ -442,6 +452,7 @@ export const subServices = [
   },
   {
     slug: 'bathroom-deep-cleaning-jalandhar',
+    image: { slug: 'bathroom', alt: 'A clean modern bathroom with wall tiles, a glass shower screen and polished chrome fittings' },
     parent: 'cleaning',
     accent: 'deepCleaning',
     name: 'Bathroom Deep Cleaning',
@@ -500,6 +511,7 @@ export const subServices = [
   },
   {
     slug: 'kitchen-deep-cleaning-jalandhar',
+    image: { slug: 'kitchen', alt: 'A clean modern kitchen with fitted cabinets, a hob and a chimney hood' },
     parent: 'cleaning',
     accent: 'deepCleaning',
     name: 'Kitchen Deep Cleaning',
@@ -560,6 +572,7 @@ export const subServices = [
   },
   {
     slug: 'sofa-carpet-cleaning-jalandhar',
+    image: { slug: 'sofa', alt: 'A clean fabric sofa in a bright living room' },
     parent: 'cleaning',
     accent: 'cleaning',
     name: 'Sofa, Carpet & Upholstery Cleaning',
@@ -622,6 +635,7 @@ export const subServices = [
   },
   {
     slug: 'full-house-deep-cleaning-jalandhar',
+    image: { slug: 'full-house', alt: 'A bright, fully cleaned home interior with clear floors and surfaces' },
     parent: 'deepCleaning',
     accent: 'deepCleaning',
     name: 'Full House Deep Cleaning',

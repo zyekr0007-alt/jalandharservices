@@ -221,6 +221,49 @@ export function postCards(posts, limit) {
 </div>`;
 }
 
+// ─────────────────────────────────────── before/after comparison slider ──
+//
+// The before image is revealed by `clip-path` driven by a `--p` custom property.
+// A full-size transparent <input type="range"> sits on top, which gives click to
+// position, drag, arrow keys and screen-reader support for free — no pointer
+// maths, no touch handling, and it works with the keyboard. The JS only mirrors
+// the input's value into `--p`.
+
+export function beforeAfter(pair, index = 0) {
+  return `<figure class="ba-figure reveal" data-delay="${index % 3}">
+  <div class="ba" style="--p:50%">
+    <img class="ba-img" src="${pair.after}" alt="${esc(pair.alt)}" loading="lazy" decoding="async" width="520" height="786">
+    <img class="ba-img ba-before" src="${pair.before}" alt="" aria-hidden="true" loading="lazy" decoding="async" width="520" height="786">
+    <span class="ba-tag ba-tag-l" aria-hidden="true">Before</span>
+    <span class="ba-tag ba-tag-r" aria-hidden="true">After</span>
+    <span class="ba-handle" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6 4 12l5 6M15 6l5 6-5 6"/></svg>
+    </span>
+    <input class="ba-range" type="range" min="0" max="100" value="50" step="1"
+           aria-label="Reveal before and after: ${esc(pair.caption)}">
+  </div>
+  <figcaption>
+    <strong>${esc(pair.caption)}</strong>
+    <span>${esc(pair.detail)}</span>
+  </figcaption>
+</figure>`;
+}
+
+export function workGallery(pairs) {
+  return `<div class="ba-grid">${pairs.map((p, i) => beforeAfter(p, i)).join('')}</div>`;
+}
+
+/** Illustration used on a service page. Illustrative — never labelled as our work. */
+export function serviceImage(slug, alt, { card = false, eager = false } = {}) {
+  const src = `/assets/img/services/${slug}${card ? '-card' : ''}.webp`;
+  const w = card ? 560 : 1200;
+  const h = card ? 350 : 750;
+  return `<figure class="svc-shot reveal">
+  <img src="${src}" alt="${esc(alt)}" width="${w}" height="${h}"
+       ${eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async">
+</figure>`;
+}
+
 // ────────────────────────────────────────────────── prose (from data) ──
 
 export function prose(sections, { startIndex = 0 } = {}) {

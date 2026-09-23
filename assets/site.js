@@ -72,6 +72,18 @@
     });
   }
 
+  /* ── before/after sliders ────────────────────────────────────────────── */
+  // The <input type="range"> is the real control — it already handles click,
+  // drag, arrow keys and assistive tech. This only mirrors its value into the
+  // `--p` custom property that drives the clip-path. Nothing to go wrong.
+  document.querySelectorAll('.ba').forEach(function (ba) {
+    var range = ba.querySelector('.ba-range');
+    if (!range) return;
+    var sync = function () { ba.style.setProperty('--p', range.value + '%'); };
+    range.addEventListener('input', sync);
+    sync();
+  });
+
   /* ── quote form ──────────────────────────────────────────────────────── */
   var form = document.getElementById('quoteForm');
   if (!form) return;
